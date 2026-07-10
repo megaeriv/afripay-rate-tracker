@@ -1,0 +1,41 @@
+name: AfriPay Rate Tracker
+
+on:
+  schedule:
+    - cron: '0 8 * * *'
+    - cron: '0 13 * * *'
+    - cron: '0 16 * * *'
+  workflow_dispatch:
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          playwright install --with-deps chromium
+
+      - name: Write Google service account key from secret
+        run: |
+          echo '${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}' > service_account.json
+
+      - name: Decide run type from current UTC hour
+        id: slot
+        run: |
+          HOUR=$(date -u +%H)
+          if [ "$HOUR" = "08" ]; then echo "type=morning"   >> "$GITHUB_OUTPUT"
+          elif [ "$HOUR" = "13" ]; then echo "type=afternoon" >> "$GITHUB_OUTPUT"
+          else echo "type=closing" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run the tracker
+        run: python main.py ${{ steps.slot.outputs.type }}
