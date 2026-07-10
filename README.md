@@ -1,4 +1,4 @@
-# AfriPay Rate Tracker — Automation Framework
+# AfriPay Rate Tracker: Automation Framework
 
 Automates collecting Morning (9am) / Afternoon (2pm) / Closing (5pm) NGN
 exchange rates from AfriPay, Lemfi, Remitly, TransferGo, Western Union and
@@ -13,26 +13,26 @@ been tested against the actual rate strings each site returned — all 13
 site/currency combinations pass, including the dual-rate sites.
 
 What's confirmed working per site:
-- **TransferGo** (GBP, EUR) — rate in a heading like "GBP = 1844.99726 NGN"
-- **AfriPay** (GBP, EUR) — two dropdowns (#ddlcountry value 6 = GBP,
+- **TransferGo** (GBP, EUR): rate in a heading like "GBP = 1844.99726 NGN"
+- **AfriPay** (GBP, EUR): two dropdowns (#ddlcountry value 6 = GBP,
   #ddlcountry_foreign value 37 = EUR); rate shows as "1872.0000"
-- **Lemfi** (GBP, EUR, USD) — shows TWO rates e.g. "GBP = 1,850 1,868.5
+- **Lemfi** (GBP, EUR, USD): shows TWO rates e.g. "GBP = 1,850 1,868.5
   NGN"; the lower (1,850) is standard, correctly selected
-- **Remitly** (GBP, EUR, USD) — explicitly labelled "Standard rate 1 GBP
+- **Remitly** (GBP, EUR, USD): explicitly labelled "Standard rate 1 GBP
   = 1858.57"
-- **MonieWorld** (GBP) — two rates jammed together "£1 = ₦1,865₦1,857";
+- **MonieWorld** (GBP): two rates jammed together "£1 = ₦1,865₦1,857";
   the lower (₦1,857) is standard, correctly selected
-- **Western Union** (GBP, USD) — "GBP = 1,824.2325 NGN" and "USD –
+- **Western Union** (GBP, USD): "GBP = 1,824.2325 NGN" and "USD =
   1343.2800 NGN" (note the US page uses a dash, not equals — handled)
 
 You still need to do the one-time setup below (install, Google Sheets
-service account, scheduler). But the hard part — the selectors — is done.
+service account, scheduler). But the hard part, the selectors, is done.
 
 **One caveat that remains true:** these are live websites, not APIs, so a
 future redesign of any one site can still break that one scraper. When it
 does, a run logs it to `logs/failures.log` and you re-run `playwright
 codegen` for just that site and paste the new selector (same process you
-just did). Expect this rarely — a couple of times a year at most.
+just did). Expect this rarely, a couple of times a year at most.
 
 ---
 
@@ -83,7 +83,7 @@ selector Playwright shows you for that rate element into the matching
 
 **Tip:** if a site shows the rate through an amount you type rather than a
 fixed number, right-click the rate value in the browser → Inspect → note
-the class name or `data-testid` attribute — that's usually more stable
+the class name or `data-testid` attribute, that's usually more stable
 than a generic CSS path.
 
 Once updated, test a single site in isolation, e.g.:
@@ -119,7 +119,7 @@ python main.py closing
 Each run prints a per-site log line (`[OK]` or `[SKIP]`/`FAILED`) so you
 can see exactly what got written and what still needs fixing.
 
-## 5. Scheduling — pick ONE of these
+## 5. Scheduling: pick ONE of these
 
 ### Option A: Cron (if you have a small always-on server / Raspberry Pi / VPS)
 ```bash
@@ -167,14 +167,14 @@ jobs:
 ```
 Store your `service_account.json` contents as a GitHub Secret rather than
 committing the file, then write it to disk as a step before `main.py` runs.
-**Important:** GitHub Actions cron runs in UTC — remember to adjust for
+**Important:** GitHub Actions cron runs in UTC, remember to adjust for
 British Summer Time (UTC+1) between late March and late October so 9am/
 2pm/5pm stay accurate UK time.
 
 ### Option C: Google Cloud Scheduler + Cloud Run/Functions
 More setup but keeps everything inside Google's ecosystem, useful if you
 want tighter integration with the Sheet. Ask if you'd like this built out
-— it's a bigger lift than A/B so I kept it out of this first pass.
+, it's a bigger lift than A/B so I kept it out of this first pass.
 
 ## 6. The "standard rate" rule
 
@@ -186,24 +186,24 @@ want tighter integration with the Sheet. Ask if you'd like this built out
 3. Returns the **lowest** of what's left — matching your instruction that
    the standard rate is always the lower conversion figure.
 
-If a site's wording for a promo rate isn't in that keyword list, add it —
+If a site's wording for a promo rate isn't in that keyword list, add it,
 that's the main thing worth watching in the first couple of weeks of runs.
 
 ## 7. Known flags to resolve before first live run
 
 - **TransferGo EUR URL**: your original list repeated the GBP URL
   (`gbp-to-ngn`) for EUR. `config.py` currently points EUR to
-  `eur-to-ngn`, which matches TransferGo's URL pattern — please confirm
+  `eur-to-ngn`, which matches TransferGo's URL pattern, please confirm
   this is right.
 - **USDNGN sheet, columns 18–20**: your sheet has a second, unlabeled
   Morning/Afternoon/Closing block after Western Union with no header
-  text. Not wired up in `config.py` — let me know if this is a 5th
+  text. Not wired up in `config.py`, let me know if this is a 5th
   company reserved for later (e.g. MonieWorld for USD?) so I can map it.
-- **Western Union GB flow** is the most fragile page here — it's a
+- **Western Union GB flow** is the most fragile page here, it's a
   multi-step transfer flow, not a simple rate page, and may hit a cookie
   banner or location check. Budget extra calibration time for this one.
 - **Rolling reserve / promo terms**: none of this affects your data, just
-  flagging that site redesigns will eventually break a selector or two —
+  flagging that site redesigns will eventually break a selector or two,
   when a run logs `NEEDS_SELECTOR_FIX` for a site, that's your cue to
   re-run `playwright codegen` for that one site only.
 
@@ -214,12 +214,12 @@ that's the main thing worth watching in the first couple of weeks of runs.
 - Google service account + sheet sharing (section 2)
 - Point the scheduler at it (section 5)
 
-**After that, genuinely nothing** — no logging in, no manual copying, no
+**After that, genuinely nothing**, no logging in, no manual copying, no
 checking three times a day. It runs itself and writes straight into your
 sheet.
 
 **The one honest caveat:** this is web scraping, not an official data
-feed — none of these six companies publish a rate API for you to query.
+feed, none of these six companies publish a rate API for you to query.
 That means if a site does a visual redesign (renames a CSS class, moves
 the rate to a different part of the page), that ONE site's scraper will
 stop finding a value until its selector is updated. This is true of any
@@ -228,7 +228,7 @@ nature of relying on a website's front-end rather than a stable API.
 
 How this is handled so it doesn't become a chore:
 - Every failed extraction gets logged to `logs/failures.log` with a
-  timestamp — you check one file, not six websites.
+  timestamp, you check one file, not six websites.
 - The five sites without a public rate API are inherently the ones that
   can drift over time; TransferGo/AfriPay-style simple converter pages
   tend to change far less often than a full app flow like Western
@@ -239,7 +239,7 @@ How this is handled so it doesn't become a chore:
   section 3), not a rebuild.
 
 If you want true zero-maintenance long-term, the only way to fully avoid
-this is if any of these providers offer an official rates API — worth
+this is if any of these providers offer an official rates API, worth
 asking AfriPay's competitors directly, since a couple of remittance
 companies do publish one for partners. Everything else here (scheduling,
 writing to your sheet, choosing the standard rate over a boosted one) is
