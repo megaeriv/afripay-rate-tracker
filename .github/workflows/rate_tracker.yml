@@ -24,21 +24,19 @@ jobs:
           pip install -r requirements.txt
           playwright install --with-deps chromium
 
-      - name: Write Google service account key from secret
-        run: |
-          echo '${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}' > service_account.json
+      - name: Write Google service account key
+        run: echo '${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}' > service_account.json
 
-- name: Decide run type (robust to GitHub cron delays)
+      - name: Decide run type
         id: slot
         run: |
           NOW_MIN=$(( 10#$(date -u +%H) * 60 + 10#$(date -u +%M) ))
-          M_DIFF=$(( NOW_MIN>480 ? NOW_MIN-480 : 480-NOW_MIN ))
-          A_DIFF=$(( NOW_MIN>780 ? NOW_MIN-780 : 780-NOW_MIN ))
-          C_DIFF=$(( NOW_MIN>960 ? NOW_MIN-960 : 960-NOW_MIN ))
+          M_DIFF=$(( NOW_MIN > 480 ? NOW_MIN - 480 : 480 - NOW_MIN ))
+          A_DIFF=$(( NOW_MIN > 780 ? NOW_MIN - 780 : 780 - NOW_MIN ))
+          C_DIFF=$(( NOW_MIN > 960 ? NOW_MIN - 960 : 960 - NOW_MIN ))
           TYPE=morning; BEST=$M_DIFF
           if [ "$A_DIFF" -lt "$BEST" ]; then BEST=$A_DIFF; TYPE=afternoon; fi
           if [ "$C_DIFF" -lt "$BEST" ]; then BEST=$C_DIFF; TYPE=closing; fi
-          echo "UTC minutes: $NOW_MIN -> slot: $TYPE"
           echo "type=$TYPE" >> "$GITHUB_OUTPUT"
 
       - name: Run the tracker
