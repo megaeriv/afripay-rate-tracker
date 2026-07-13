@@ -6,6 +6,17 @@ on:
     - cron: '0 13 * * *'
     - cron: '0 16 * * *'
   workflow_dispatch:
+    inputs:
+      slot_override:
+        description: "Force a slot for testing (use 'auto' for normal scheduled behaviour)"
+        required: false
+        default: "auto"
+        type: choice
+        options:
+          - auto
+          - morning
+          - afternoon
+          - closing
 
 jobs:
   scrape:
@@ -30,6 +41,11 @@ jobs:
       - name: Decide run type
         id: slot
         run: |
+          OVERRIDE="${{ github.event.inputs.slot_override }}"
+          if [ -n "$OVERRIDE" ] && [ "$OVERRIDE" != "auto" ]; then
+            echo "type=$OVERRIDE" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           NOW_MIN=$(( 10#$(date -u +%H) * 60 + 10#$(date -u +%M) ))
           M_DIFF=$(( NOW_MIN > 480 ? NOW_MIN - 480 : 480 - NOW_MIN ))
           A_DIFF=$(( NOW_MIN > 780 ? NOW_MIN - 780 : 780 - NOW_MIN ))
