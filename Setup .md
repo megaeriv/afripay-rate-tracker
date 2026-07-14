@@ -1,44 +1,72 @@
-# AfriPay Rate Tracker: Automation Framework
+# AfriPay Rate Tracker
 
-Automates collecting Morning (9am) / Afternoon (2pm) / Closing (5pm) NGN
-exchange rates from AfriPay, Lemfi, Remitly, TransferGo, Western Union and
-MonieWorld across GBP, EUR and USD, and writes them straight into your
-`AFRIPAY_PRICE_COMPARISON` Google Sheet in the correct cells.
+This project automatically collects Nigerian Naira exchange rates from six remittance providers three times a day and writes them into a Google Sheet. It covers AfriPay, Lemfi, Remitly, TransferGo, Western Union and MonieWorld across GBP, EUR and USD.
 
-## ⚠️ Status: ALL SITES CALIBRATED ✓ (July 2026)
+Rates are captured at three points each day, timed to UK hours: morning at 9am, afternoon at 2pm and closing at 5pm. Each run finds the current day's row in the sheet, or creates it, then fills the correct Morning, Afternoon or Closing column for every provider and currency.
 
-Every scraper now uses **real, verified selectors** captured via
-`playwright codegen` against the live sites. The rate-parsing logic has
-been tested against the actual rate strings each site returned — all 13
-site/currency combinations pass, including the dual-rate sites.
+## Status
 
-What's confirmed working per site:
-- **TransferGo** (GBP, EUR): rate in a heading like "GBP = 1844.99726 NGN"
-- **AfriPay** (GBP, EUR): two dropdowns (#ddlcountry value 6 = GBP,
-  #ddlcountry_foreign value 37 = EUR); rate shows as "1872.0000"
-- **Lemfi** (GBP, EUR, USD): shows TWO rates e.g. "GBP = 1,850 1,868.5
-  NGN"; the lower (1,850) is standard, correctly selected
-- **Remitly** (GBP, EUR, USD): explicitly labelled "Standard rate 1 GBP
-  = 1858.57"
-- **MonieWorld** (GBP): two rates jammed together "£1 = ₦1,865₦1,857";
-  the lower (₦1,857) is standard, correctly selected
-- **Western Union** (GBP, USD): "GBP = 1,824.2325 NGN" and "USD =
-  1343.2800 NGN" (note the US page uses a dash, not equals — handled)
+All sites are calibrated and live. Every scraper uses real, verified selectors captured with `playwright codegen` against the live pages, and the rate parsing has been tested against the actual rate strings each site returns. All thirteen site and currency combinations pass, including the sites that show two rates at once.
 
-You still need to do the one-time setup below (install, Google Sheets
-service account, scheduler). But the hard part, the selectors, is done.
+## How it works
 
-**One caveat that remains true:** these are live websites, not APIs, so a
-future redesign of any one site can still break that one scraper. When it
-does, a run logs it to `logs/failures.log` and you re-run `playwright
-codegen` for just that site and paste the new selector (same process you
-just did). Expect this rarely, a couple of times a year at most.
+The system has three parts working together.
 
----
+The **scrapers** use Playwright to open each provider's live rate page in a headless browser, select the right currencies where a page needs it, read the displayed rate and extract the numeric value. Several providers show two rates at once, a standard rate and a higher promotional or boosted rate. In every case the tracker takes the lower standard rate, never the boosted one.
 
-## Original setup notes (still apply)
+The **sheet writer** connects to Google Sheets through a service account and writes each rate into its designated cell. It matches the day's date regardless of how the date is formatted, and it resolves the target row once per tab per run so that a single day always produces one clean row rather than duplicates.
 
-## 1. Install
+The **scheduler** runs on cron-job.org, a free external service. Three separate jobs fire at 9am, 2pm and 5pm UK time and trigger the GitHub Actions workflow, passing the exact slot name (morning, afternoon or closing) with each call. Because the slot is stated explicitly rather than guessed from the clock, a run that starts a few minutes late still lands in the correct column.
+
+## Why cron-job.org instead of GitHub's built in scheduler
+
+GitHub Actions has its own scheduled triggers, but on free accounts those triggers are best effort. In practice they can be delayed by anything from fifteen minutes to over an hour, and occasionally skipped. That level of drift caused runs to land in the wrong time slots or overlap.
+
+cron-job.org fires punctually and lets each job specify its slot directly, which keeps morning, afternoon and closing cleanly separated. It also runs in the Europe/London timezone, so the switch between British Summer Time and GMT is handled automatically with no manual change needed when the clocks move.
+
+## Provider notes
+
+Each provider page behaves slightly differently, and the scrapers account for this.
+
+**TransferGo** determines the currency pair entirely from the URL, so no in page interaction is needed. The rate appears in a heading such as "GBP = 1844.99726 NGN". It covers GBP and EUR.
+
+**AfriPay** exposes GBP and EUR corridors only. The rate appears once both country dropdowns are set (the send dropdown and the receive dropdown), shown as a four decimal figure followed by the words "Exchange Rate".
+
+**Lemfi** is a single page reachable for all three currencies. The receive currency must be set to Nigeria first, then the send currency is chosen. It displays two figures side by side, standard and boosted, and the tracker keeps the lower one. Because the page is slow to load on cloud servers, the scraper waits patiently and retries until a real, non zero rate appears.
+
+**Remitly** uses a separate locale specific URL per currency (gb, be, us) and labels its standard rate explicitly, which makes it straightforward to read. It covers GBP, EUR and USD.
+
+**MonieWorld** covers GBP only. It shows a boosted rate struck through against the standard rate. The scraper reads the wider block of text containing both figures and keeps the lower standard rate.
+
+**Western Union** has two different page types. The GBP page is a transfer start flow and the USD page is a simpler converter. The USD page separates its numbers with a dash rather than an equals sign, which the scraper handles.
+
+## Repository layout
+
+```
+rate_tracker/
+  config.py            sheet tab names, column mapping, provider URLs, promo keywords
+  main.py              orchestrates one run across all providers and currencies
+  sheets_writer.py     matches the day's row and writes each rate into the right cell
+  requirements.txt     Python dependencies
+  scrapers/
+    base.py            shared rate extraction and standard rate selection
+    afripay.py
+    lemfi.py
+    remitly.py
+    transfergo.py
+    western_union.py
+    monieworld.py
+  .github/workflows/
+    rate_tracker.yml   the GitHub Actions workflow, triggered by cron-job.org
+```
+
+The Google service account key is never stored in the repository. It is held as a GitHub Actions secret named `GOOGLE_SERVICE_ACCOUNT_JSON` and written to disk only during a run.
+
+## Full setup guide (replicating from scratch)
+
+The system is already set up and running. This section records the complete process so the whole thing can be rebuilt from nothing, whether on a new machine or for a different sheet.
+
+### 1. Install
 
 ```bash
 cd rate_tracker
@@ -46,25 +74,17 @@ pip install -r requirements.txt
 playwright install chromium
 ```
 
-## 2. Google Sheets access (Service Account — no login prompts)
+### 2. Google Sheets access through a service account
 
-1. Go to [Google Cloud Console](https://console.cloud.google.com/) → create
-   a project (or reuse one) → enable the **Google Sheets API** and
-   **Google Drive API**.
-2. Go to *IAM & Admin → Service Accounts* → Create Service Account.
-3. Create a key for it (JSON) → download it → save as
-   `rate_tracker/service_account.json`.
-4. Open your Google Sheet → click **Share** → paste the service account's
-   email (looks like `xxx@xxx.iam.gserviceaccount.com`) → give it **Editor**
-   access.
-5. In `config.py`, set `GOOGLE_SHEET_ID` to the ID from your sheet's URL
-   (the long string between `/d/` and `/edit`) — more reliable than
-   matching by name.
+1. In the Google Cloud Console, create a project (or reuse one) and enable the Google Sheets API and Google Drive API.
+2. Under IAM and Admin, Service Accounts, create a service account.
+3. Create a JSON key for it, download it, and save it as `rate_tracker/service_account.json` for local runs. For the scheduled cloud runs it is stored as a GitHub secret instead (see step 5).
+4. Open the Google Sheet, click Share, paste the service account email (it looks like `name@project.iam.gserviceaccount.com`) and give it Editor access.
+5. In `config.py`, set `GOOGLE_SHEET_ID` to the ID from the sheet's URL, which is the long string between `/d/` and `/edit`. This is more reliable than matching by name. Also confirm the tab names in `config.py` match the sheet exactly, including any slash, for example `GBP/NGN`.
 
-## 3. Calibrating selectors (do this once per site)
+### 3. Calibrating a site's selectors
 
-For each site, run Playwright's built-in recorder, which opens a real
-browser and shows you the exact selector for anything you click:
+Each scraper is already calibrated, but if a page changes or a new provider is added, the selectors are captured like this. Playwright's recorder opens a real browser and prints the exact selector for anything clicked:
 
 ```bash
 playwright codegen https://afripay.uk/send-money-to-nigeria
@@ -76,39 +96,42 @@ playwright codegen https://www.westernunion.com/us/en/currency-converter/usd-to-
 playwright codegen https://monieworld.com/
 ```
 
-For each one: interact with the page the way you would manually (pick a
-currency, type an amount) until the rate is visible, then copy the
-selector Playwright shows you for that rate element into the matching
-`SELECTORS` dict in `scrapers/<site>.py`.
+For each one, interact with the page the way a person would (dismiss the cookie banner, pick a currency, enter an amount) until the rate is visible, then copy the recorded actions into the matching scraper in `scrapers/`. The recorded selectors are more reliable than hand written CSS paths because they come from the live page.
 
-**Tip:** if a site shows the rate through an amount you type rather than a
-fixed number, right-click the rate value in the browser → Inspect → note
-the class name or `data-testid` attribute, that's usually more stable
-than a generic CSS path.
+### 4. Testing a single site
 
-Once updated, test a single site in isolation, e.g.:
+Before relying on a scraper, test it on its own in a visible browser so its behaviour can be watched:
 
 ```python
 # test_one.py
 import asyncio
 from playwright.async_api import async_playwright
-from scrapers import afripay
+from scrapers import transfergo
 
 async def main():
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=False)  # headed = watch it work
+        browser = await p.chromium.launch(headless=False)  # visible browser
         page = await browser.new_page()
-        result = await afripay.get_rate(page, "GBP", "https://afripay.uk/send-money-to-nigeria")
+        result = await transfergo.get_rate(page, "GBP", "https://www.transfergo.com/currency-converter/gbp-to-ngn")
         print(result)
         await browser.close()
 
 asyncio.run(main())
 ```
 
-Run with `headless=False` while calibrating so you can see what's
-happening; switch back to `headless=True` in `main.py` for scheduled runs.
+A result containing a `standard_rate` value means that site works. The scheduled runs use a headless (invisible) browser automatically.
 
-## 4. Run manually
+### 5. Storing the key as a GitHub secret
+
+For the cloud runs the service account key is not committed to the repository. Instead:
+
+1. Open the JSON key file and copy its entire contents.
+2. In the repository, go to Settings, Secrets and variables, Actions, New repository secret.
+3. Name it `GOOGLE_SERVICE_ACCOUNT_JSON` and paste the JSON as the value.
+
+The workflow writes this secret to `service_account.json` at the start of each run.
+
+### 6. Running manually from the command line
 
 ```bash
 python main.py morning
@@ -116,149 +139,45 @@ python main.py afternoon
 python main.py closing
 ```
 
-Each run prints a per-site log line (`[OK]` or `[SKIP]`/`FAILED`) so you
-can see exactly what got written and what still needs fixing.
+Each run prints a line per site (`[OK]`, `[SKIP]` or a failure) showing exactly what was written and what needs attention.
 
-## 5. Scheduling: pick ONE of these
+### 7. Scheduling with cron-job.org
 
-### Option A: Cron (if you have a small always-on server / Raspberry Pi / VPS)
-```bash
-crontab -e
-```
-```
-0 9  * * * cd /path/to/rate_tracker && /usr/bin/python3 main.py morning   >> logs/morning.log 2>&1
-0 14 * * * cd /path/to/rate_tracker && /usr/bin/python3 main.py afternoon >> logs/afternoon.log 2>&1
-0 17 * * * cd /path/to/rate_tracker && /usr/bin/python3 main.py closing   >> logs/closing.log 2>&1
-```
-(Adjust the hour numbers for your server's timezone if it isn't UK time.)
+The scheduler is external, using the free service cron-job.org. Three jobs, one per slot, trigger the workflow at the right times. A GitHub personal access token with Actions read and write permission on the repository is required first (created under Settings, Developer settings, Personal access tokens, Fine grained tokens).
 
-### Option B: GitHub Actions (free, no server needed, recommended)
-Create `.github/workflows/rate_tracker.yml`:
-```yaml
-name: Rate Tracker
-on:
-  schedule:
-    - cron: '0 9 * * *'   # 9am UTC — adjust for BST (UK summer time is UTC+1)
-    - cron: '0 14 * * *'  # 2pm
-    - cron: '0 17 * * *'  # 5pm
-  workflow_dispatch: {}     # lets you trigger manually from GitHub's UI too
+Each job is configured as follows:
 
-jobs:
-  run:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-      - run: pip install -r rate_tracker/requirements.txt
-      - run: playwright install --with-deps chromium
-      - name: Determine run type from time
-        id: run_type
-        run: |
-          HOUR=$(date -u +%H)
-          if [ "$HOUR" = "09" ]; then echo "type=morning" >> $GITHUB_OUTPUT
-          elif [ "$HOUR" = "14" ]; then echo "type=afternoon" >> $GITHUB_OUTPUT
-          else echo "type=closing" >> $GITHUB_OUTPUT
-          fi
-      - run: python rate_tracker/main.py ${{ steps.run_type.outputs.type }}
-        env:
-          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
-```
-Store your `service_account.json` contents as a GitHub Secret rather than
-committing the file, then write it to disk as a step before `main.py` runs.
-**Important:** GitHub Actions cron runs in UTC, remember to adjust for
-British Summer Time (UTC+1) between late March and late October so 9am/
-2pm/5pm stay accurate UK time.
+- Request method: POST
+- URL: `https://api.github.com/repos/megaeriv/afripay-rate-tracker/actions/workflows/rate_tracker.yml/dispatches`
+- Timezone: Europe/London
+- Schedule: 09:00 for morning, 14:00 for afternoon, 17:00 for closing
+- Headers:
+  - `Authorization` set to the word `Bearer`, a space, then the personal access token
+  - `Accept` set to `application/vnd.github+json`
+  - `Content-Type` set to `application/json`
+- Request body, with the slot name changed per job:
+  - Morning: `{"ref":"main","inputs":{"slot_override":"morning"}}`
+  - Afternoon: `{"ref":"main","inputs":{"slot_override":"afternoon"}}`
+  - Closing: `{"ref":"main","inputs":{"slot_override":"closing"}}`
 
-### Option C: Google Cloud Scheduler + Cloud Run/Functions
-More setup but keeps everything inside Google's ecosystem, useful if you
-want tighter integration with the Sheet. Ask if you'd like this built out
-, it's a bigger lift than A/B so I kept it out of this first pass.
+GitHub's own `schedule` triggers are intentionally left out of the workflow so that only cron-job.org drives the runs, which avoids duplicate or mistimed executions.
 
-## 6. The "standard rate" rule
+### 8. Running a manual test from GitHub
 
-`scrapers/base.py` → `pick_standard_rate()` does this:
-1. Collects every rate-like number found on the page for that company.
-2. Drops any whose nearby text contains a promo keyword (`boost`,
-   `special`, `promo`, `flash`, `bonus`, `offer`, etc. — full list in
-   `config.BOOSTED_RATE_KEYWORDS`).
-3. Returns the **lowest** of what's left — matching your instruction that
-   the standard rate is always the lower conversion figure.
+The workflow can also be triggered by hand from the GitHub Actions tab using Run workflow. A dropdown allows a specific slot to be forced (morning, afternoon or closing) for testing rather than relying on the scheduled time. This writes to the current day's row in the chosen slot.
 
-If a site's wording for a promo rate isn't in that keyword list, add it,
-that's the main thing worth watching in the first couple of weeks of runs.
+## Standard rate rule
 
-## 7. Known flags to resolve before first live run
+Several providers advertise a boosted or promotional rate alongside their standard rate. The tracker always records the standard rate, which is the lower of the two figures.
 
-- **TransferGo EUR URL**: your original list repeated the GBP URL
-  (`gbp-to-ngn`) for EUR. `config.py` currently points EUR to
-  `eur-to-ngn`, which matches TransferGo's URL pattern, please confirm
-  this is right.
-- **USDNGN sheet, columns 18–20**: your sheet has a second, unlabeled
-  Morning/Afternoon/Closing block after Western Union with no header
-  text. Not wired up in `config.py`, let me know if this is a 5th
-  company reserved for later (e.g. MonieWorld for USD?) so I can map it.
-- **Western Union GB flow** is the most fragile page here, it's a
-  multi-step transfer flow, not a simple rate page, and may hit a cookie
-  banner or location check. Budget extra calibration time for this one.
-- **Rolling reserve / promo terms**: none of this affects your data, just
-  flagging that site redesigns will eventually break a selector or two,
-  when a run logs `NEEDS_SELECTOR_FIX` for a site, that's your cue to
-  re-run `playwright codegen` for that one site only.
+The logic in `scrapers/base.py` pulls every plausible rate figure from the relevant text, drops any figure whose nearby text contains a promotional keyword (boost, special, promo, flash, bonus, offer and similar, with the full list in `config.BOOSTED_RATE_KEYWORDS`), and returns the lowest remaining value. If a site introduces new promotional wording, adding that word to the keyword list keeps the rule working.
 
-## 8. Will you need to touch this again? (honest answer)
+## Maintenance
 
-**One-time setup (unavoidable, has to happen once):**
-- Calibrate selectors per site (~10–15 min each, see section 3)
-- Google service account + sheet sharing (section 2)
-- Point the scheduler at it (section 5)
+The system is designed to run without daily attention, but a few things are worth knowing.
 
-**After that, genuinely nothing**, no logging in, no manual copying, no
-checking three times a day. It runs itself and writes straight into your
-sheet.
+Each run appears in the GitHub Actions tab with a green tick on success. The cron-job.org dashboard shows the last execution status for each of the three daily jobs.
 
-**The one honest caveat:** this is web scraping, not an official data
-feed, none of these six companies publish a rate API for you to query.
-That means if a site does a visual redesign (renames a CSS class, moves
-the rate to a different part of the page), that ONE site's scraper will
-stop finding a value until its selector is updated. This is true of any
-scraping-based automation, not specific to how this was built — it's the
-nature of relying on a website's front-end rather than a stable API.
+The scheduler authenticates to GitHub with a personal access token that has an expiry date. When that token expires the three cron jobs will begin to fail, at which point a new token is generated and pasted into the Authorization header of each job. This is the only recurring maintenance item.
 
-How this is handled so it doesn't become a chore:
-- Every failed extraction gets logged to `logs/failures.log` with a
-  timestamp, you check one file, not six websites.
-- The five sites without a public rate API are inherently the ones that
-  can drift over time; TransferGo/AfriPay-style simple converter pages
-  tend to change far less often than a full app flow like Western
-  Union's GB transfer start page.
-- In practice, expect maybe a couple of these a year, not monthly — most
-  remittance sites don't redesign their rate widgets often. When it does
-  happen, it's a 10-minute fix (same `playwright codegen` process from
-  section 3), not a rebuild.
-
-If you want true zero-maintenance long-term, the only way to fully avoid
-this is if any of these providers offer an official rates API, worth
-asking AfriPay's competitors directly, since a couple of remittance
-companies do publish one for partners. Everything else here (scheduling,
-writing to your sheet, choosing the standard rate over a boosted one) is
-fully hands-off already.
-
-## File structure
-```
-rate_tracker/
-├── config.py              # sheet columns, URLs, schedule, promo keywords
-├── main.py                 # orchestrator — run this on a schedule
-├── sheets_writer.py         # writes results into the right Google Sheet cell
-├── requirements.txt
-├── service_account.json    # you provide this (not included)
-└── scrapers/
-    ├── base.py             # shared "pick standard rate" + text-parsing helpers
-    ├── afripay.py
-    ├── lemfi.py
-    ├── remitly.py
-    ├── transfergo.py
-    ├── western_union.py
-    └── monieworld.py
-```
+These are live websites rather than official rate APIs. If a provider redesigns its rate page, that one scraper may stop finding a value and will log the issue rather than crash the whole run. Recalibrating it means recording the new page layout with `playwright codegen` and updating that scraper's selectors, as described in the setup guide above. In practice this is rare, since remittance sites do not redesign their rate widgets often, and simple converter pages like TransferGo change far less than a full transfer flow like Western Union's.
